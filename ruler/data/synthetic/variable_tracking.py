@@ -144,8 +144,10 @@ def generate_input_output(num_noises, num_chains, num_hops, is_icl=False):
 def randomize_icl(icl_example):
     icl_tgt_cut = icl_example.index(TASKS['variable_tracking']['answer_prefix'][-10:])
     icl_tgt = icl_example[icl_tgt_cut + 10 :].strip().split()
-    for item in icl_tgt:
+    for i, item in enumerate(icl_tgt):
         new_item = ''.join(random.choices(string.ascii_uppercase, k=len(item))).upper()
+        # if i == 0:
+        #     new_item = ''
         icl_example = icl_example.replace(item, new_item)
     return icl_example
 
@@ -206,6 +208,7 @@ def sys_vartrack_w_noise_random(
             # insert icl_example between model template and input
             cutoff = context.index(TASKS['variable_tracking']['context_template'][:20])
             context = context[:cutoff] + ' ' + randomize_icl(icl_example) + '\n\n' + context[cutoff:]
+            # context = context[:cutoff] + ' ' + icl_example + '\n\n' + context[cutoff:]
         if args.remove_newline_tab:
             context = ' '.join(context.replace('\n', ' ').replace('\t', ' ').strip().split())
             query = ' '.join(query.replace('\n', ' ').replace('\t', ' ').strip().split())

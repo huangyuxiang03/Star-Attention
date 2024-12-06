@@ -31,6 +31,7 @@
 from typing import Optional, Union
 
 import torch
+import torch.distributed as dist
 from flash_attn.bert_padding import pad_input  # noqa
 from transformers.modeling_flash_attention_utils import prepare_fa2_from_position_ids, _upad_input
 from .star_flash_attn import star_flash_attn_func, star_flash_attn_varlen_func
@@ -97,7 +98,7 @@ def _flash_attention_forward(
 
     if not enable_star_attn:
         flash_kwargs["num_ring_steps"] = num_ring_steps
-
+        
     # Contains at least one padding token in the sequence
     if attention_mask is not None:
         batch_size = query_states.shape[0]
@@ -156,5 +157,4 @@ def _flash_attention_forward(
         attn_output = attn_fn(
             query_states, key_states, value_states, dropout, softmax_scale=softmax_scale, causal=causal, **flash_kwargs
         )
-
     return attn_output

@@ -18,12 +18,13 @@ import json
 import os
 import time
 from typing import List, Optional
-
+import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
 from model import DenseAttentionModel, RingAttentionModel, StarAttentionModel
-
+from lring.utils import load_ring_model_tokenizer, ring_prefill_and_decode
+import torch.distributed as dist
 
 def read_jsonl(filename, num_lines=-1):
     lines = []
@@ -71,34 +72,12 @@ def load_model(
     anchor_block_size=-1,
     stop_words=None,
 ):
-    if attn_type == 'dense':
-        model = DenseAttentionModel(
-            path=model_path,
-            max_new_tokens=tokens_to_generate,
-            stop_words=stop_words,
-        )
-
-    elif attn_type == 'ring':
-        model = RingAttentionModel(
-            path=model_path,
-            max_new_tokens=tokens_to_generate,
-            stop_words=stop_words,
-        )
-
-    elif attn_type == 'star':
-        assert block_size > 0, 'block_size must be provided for star attention'
-        model = StarAttentionModel(
-            path=model_path,
-            block_size=block_size,
-            max_new_tokens=tokens_to_generate,
-            stop_words=stop_words,
-            anchor_block_size=anchor_block_size,
-        )
-
-    else:
-        raise ValueError(f'Unsupported attention type: {attn_type}')
-
-    return model
+    model, tokenizer = load_ring_model_tokenizer(model_path)
+    # if dist.get_rank() == 0:
+    #     breakpoint()
+    # dist.barrier()
+    stop_ids = [tokenizer.encode(s)[-1] for s in stop_words]
+    return model, tokenizer, stop_ids
 
 
 def main(
@@ -144,7 +123,7 @@ def main(
         output_file_mode = 'at'
 
     # Load model
-    model = load_model(
+    model, tokenizer, stop_ids = load_model(
         model_path,
         attn_type,
         tokens_to_generate,
@@ -152,6 +131,7 @@ def main(
         anchor_block_size,
         stop_words=stop_words,
     )
+    max_new_tokens = tokens_to_generate
 
     if rank == 0:
         inference_start_time = time.time()
@@ -160,13 +140,18 @@ def main(
     # setting buffering=1 to force to dump the output after every line, so that we can see intermediate generations
     with open(output_file, output_file_mode, encoding='utf-8', buffering=1) as fout:
         for input_sample in tqdm(input_data, total=len(input_data)):
-            pred = model(prompt_context=input_sample['input_context'], prompt_query=input_sample['input_query'])
+            # pred = model(prompt_context=input_sample['input_context'], prompt_query=input_sample['input_query'])
+            input_str = input_sample['input_context'] + input_sample['input_query']
+            input_ids = tokenizer(input_str, return_tensors='pt', add_special_tokens=False).to(f"cuda:{rank}").input_ids
+            position_ids = torch.arange(input_ids.shape[-1], dtype=torch.long, device=torch.device(f"cuda:{rank}")).unsqueeze(0)
+            generated_ids = ring_prefill_and_decode(model, input_ids, position_ids, max_new_tokens=max_new_tokens, stop_ids=stop_ids)
+            pred = tokenizer.decode(generated_ids, skip_special_tokens=True)
             if rank == 0:
                 fout.write(
                     json.dumps(
                         {
                             'index': input_sample.get('index', -1),
-                            'pred': pred['text'][0],
+                            'pred': pred,
                             'input_context': input_sample['input_context'],
                             'input_query': input_sample['input_query'],
                             'outputs': (
@@ -179,17 +164,15 @@ def main(
                     )
                     + '\n'
                 )
-            if attn_type != "dense":
-                dist.barrier()
+            dist.barrier()
 
     if rank == 0:
         end_time = time.time()
         print(f'Total time: {round((end_time - process_start_time) / 60, 1)} minutes')
         print(f'Inference time: {round((end_time - inference_start_time) / 60, 1)} minutes')
 
-    if attn_type != "dense":
-        dist.barrier()
-        dist.destroy_process_group()
+    dist.barrier()
+    dist.destroy_process_group()
 
 
 if __name__ == '__main__':

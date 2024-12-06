@@ -97,13 +97,20 @@ class StarLlamaFlashAttention2(LlamaFlashAttention2):
                 "`static` cache implementation is not compatible with `attn_implementation==flash_attention_2` "
                 "make sure to use `sdpa` in the mean time, and open an issue at https://github.com/huggingface/transformers"
             )
+        # if enable_star_attn:
+            # if dist.get_rank() == 0:
+            #     breakpoint()
+            #     a = 1
+            # dist.barrier()
+            
+
 
         if (
             enable_star_attn
             and RANK != WORLD_SIZE - 1
             and (past_key_value is None or past_key_value.get_seq_length(self.layer_idx) == 0)
         ):
-            raise ValueError('With Star Attention, only the last rank should have a non-empty kv-cache')
+            raise ValueError('[Dont know the reason] With Star Attention, only the last rank should have a non-empty kv-cache')
 
         output_attentions = False
 
@@ -112,6 +119,9 @@ class StarLlamaFlashAttention2(LlamaFlashAttention2):
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
+            
+
+
 
         # Flash attention requires the input to have the shape
         # batch_size x seq_length x head_dim x hidden_dim

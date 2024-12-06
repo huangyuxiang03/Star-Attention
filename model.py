@@ -134,6 +134,7 @@ class DistributedInferenceBaseModel:
                 outputs = self.model(
                     input_ids,
                     position_ids=position_ids,
+                    cache_position=position_ids[0],
                     past_key_values=past_key_values,
                     use_cache=True,
                     enable_star_attn=True,
@@ -200,6 +201,7 @@ class StarAttentionModel(DistributedInferenceBaseModel):
         # If the anchor block size is not provided, use the entire first block
         if self.anchor_block_size is None:
             self.anchor_block_size = ctx_ids_blocks[0][0].shape[-1]
+
 
         kv_rank = []
         for idx in range(len(ctx_ids_blocks[self.rank])):
@@ -300,6 +302,7 @@ class RingAttentionModel(DistributedInferenceBaseModel):
             kv_rank = self.model(
                 ctx_block,
                 position_ids=position_block,
+                cache_position=position_block[0],
                 use_cache=True,
                 num_ring_steps=-1,  # enable ring attention
                 enable_star_attn=False,
@@ -329,6 +332,9 @@ class RingAttentionModel(DistributedInferenceBaseModel):
         # Phase 2 from Star Attention: Global attention with online softmax
         qry_ids = self._tokenize(prompt_query)
         qry_position_ids = torch.arange(ctx_len, ctx_len + qry_ids.shape[-1]).unsqueeze(0).to(self.model.device)
+        # torch.save(kv_rank, f"{self.rank}.ckpt")
+        # dist.barrier()
+        # exit(0)
         output = self._generate_output(qry_ids, qry_position_ids, kv_rank)
 
         # Get the generated text
@@ -391,7 +397,6 @@ class DenseAttentionModel:
         prompt = prompt_context + prompt_query
         input_ids = self.tokenizer.encode(prompt, return_tensors='pt', add_special_tokens=False).to(self.model.device)
         position_ids = torch.arange(input_ids.shape[-1]).unsqueeze(0).to(self.model.device)
-
         output = self._generate_output(input_ids, position_ids)
 
         return {'text': [self._get_output_text(output)]}
